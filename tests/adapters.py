@@ -111,7 +111,7 @@ def run_scaled_dot_product_attention(
   Returns:
       Float[Tensor, " ... queries d_v"]: Output of SDPA
   """
-  raise NotImplementedError
+  return model.scaled_dot_product_attention(Q, K, V, mask=mask)
 
 
 def run_multihead_self_attention(
@@ -207,7 +207,9 @@ def run_rope(
   Returns:
       Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
   """
-  raise NotImplementedError
+  rope_module = model.RoPE(d_k=d_k, max_seq_len=max_seq_len, theta=theta)
+  y = rope_module(in_query_or_key)
+  return y
 
 
 def run_transformer_block(
@@ -427,7 +429,9 @@ def run_get_batch(
   raise NotImplementedError
 
 
-def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
+def run_softmax(
+  in_features: Float[Tensor, " ..."], dim: int
+) -> Float[Tensor, " ..."]:
   """
   Given a tensor of inputs, return the output of softmaxing the given `dim`
   of the input.
@@ -440,11 +444,12 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
       Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
       softmax normalizing the specified `dim`.
   """
-  raise NotImplementedError
+  return model.softmax(in_features, dim)
 
 
 def run_cross_entropy(
-  inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]
+  inputs: Float[Tensor, " batch_size vocab_size"],
+  targets: Int[Tensor, " batch_size"],
 ) -> Float[Tensor, ""]:
   """Given a tensor of inputs and targets, compute the average cross-entropy
   loss across examples.
@@ -461,7 +466,9 @@ def run_cross_entropy(
   raise NotImplementedError
 
 
-def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
+def run_gradient_clipping(
+  parameters: Iterable[torch.nn.Parameter], max_l2_norm: float
+) -> None:
   """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
 
   Args:
