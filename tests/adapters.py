@@ -9,7 +9,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics import model, loss
+from cs336_basics import model, loss, optimizer
 
 
 def run_linear(
@@ -522,7 +522,7 @@ def get_adamw_cls() -> Any:
   """
   Returns a torch.optim.Optimizer that implements AdamW.
   """
-  raise NotImplementedError
+  return optimizer.AdamW
 
 
 def run_get_lr_cosine_schedule(
