@@ -9,7 +9,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics import model
+from cs336_basics import model, loss
 
 
 def run_linear(
@@ -501,7 +501,7 @@ def run_cross_entropy(
   Returns:
       Float[Tensor, ""]: The average cross-entropy loss across examples.
   """
-  raise NotImplementedError
+  return loss.cross_entropy(logits=inputs, targets=targets)
 
 
 def run_gradient_clipping(
