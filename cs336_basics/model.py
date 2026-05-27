@@ -6,45 +6,71 @@ from einops import einsum, rearrange
 
 
 class Linear(torch.nn.Module):
+  """
+  Weights:
+    in_features * out_features
+
+  FLOPS:
+    b * s * d_in * d_out * 2
+  """
+
   def __init__(
     self, in_features: int, out_features: int, device=None, dtype=None
   ):
     super().__init__()
     self.device = device
-    self.weights = nn.Parameter(
+    self.weight = nn.Parameter(
       torch.empty(out_features, in_features, device=device, dtype=dtype)
     )
     mean = 0
     stddev = (2 / (in_features + out_features)) ** 0.5
     nn.init.trunc_normal_(
-      self.weights, mean=mean, std=stddev, a=-3 * stddev, b=3 * stddev
+      self.weight, mean=mean, std=stddev, a=-3 * stddev, b=3 * stddev
     )
 
   def forward(self, x: torch.Tensor) -> torch.Tensor:
-    ret = einsum(x, self.weights, "... d_in, d_out d_in -> ... d_out")
+    ret = einsum(x, self.weight, "... d_in, d_out d_in -> ... d_out")
     return ret
 
 
 class Embedding(nn.Module):
+  """Embedding
+
+  Weights:
+    num_embedding x embedding_dim
+
+  FLOPS:
+    0
+  """
+
   def __init__(
     self, num_embeddings: int, embedding_dim: int, device=None, dtype=None
   ):
     super().__init__()
-    self.weights = nn.Parameter(
+    self.weight = nn.Parameter(
       torch.empty(num_embeddings, embedding_dim, device=device, dtype=dtype)
     )
-    nn.init.trunc_normal_(self.weights, mean=0, std=1, a=-3, b=3)
+    nn.init.trunc_normal_(self.weight, mean=0, std=1, a=-3, b=3)
 
   def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-    return self.weights[token_ids]
+    return self.weight[token_ids]
 
 
 class RMSNorm(nn.Module):
+  """RMS Norm
+
+  Weights:
+    d_model x 1
+
+  FLOPS:
+    b * s * 2 * d_model  + b * s + b * s * d_model
+  """
+
   def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
     super().__init__()
     self.eps = eps
     self.d_model = d_model
-    self.weights = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+    self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
   def forward(self, x: torch.Tensor) -> torch.Tensor:
     in_type = x.dtype
@@ -54,20 +80,34 @@ class RMSNorm(nn.Module):
       self.eps + einsum(x, x, "... d_model, ... d_model -> ...") / self.d_model
     )
 
-    y = einsum(x, self.weights, "... d_model, d_model -> ... d_model")
+    y = einsum(x, self.weight, "... d_model, d_model -> ... d_model")
 
     y = y / rearrange(rms, "... -> ... 1")
     y = y.to(in_type)
     return y
 
 
-def silu(x: torch.Tensor) -> torch.Tensor:
+def silu(
+  x: jaxtyping.Float[torch.Tensor, "b s d_ff"],
+) -> jaxtyping.Float[torch.Tensor, "b s d_ff"]:
+  """
+  FLOPS:
+    b * s * d_ff
+  """
   return x * torch.sigmoid(x)
 
 
 class SwiGLU(nn.Module):
   def __init__(self, d_model: int, d_ff: int = None, device=None, dtype=None):
     """SwiGLU
+
+    Weights:
+      d_model x d_ff
+      d_ff x d_model
+      d_model x d_ff
+
+    FLOPS:
+      6 * b * s * d_model * d_ff + 2 * b * s * d_ff
 
     Args:
       d_model: the input/output dim.
@@ -82,29 +122,39 @@ class SwiGLU(nn.Module):
     else:
       self.d_ff = math.ceil(8 * d_model / 3.0) * 64
 
-    self.w1 = nn.Parameter(
-      torch.ones(self.d_ff, d_model, device=device, dtype=dtype)
+    self.w1 = Linear(d_model, self.d_ff, device=device, dtype=dtype)
+    self.w2 = Linear(self.d_ff, d_model, device=device, dtype=dtype)
+    self.w3 = Linear(d_model, self.d_ff, device=device, dtype=dtype)
+    self.w1.load_state_dict(
+      {"weight": torch.ones(self.d_ff, d_model, device=device, dtype=dtype)}
     )
-    self.w2 = nn.Parameter(
-      torch.ones(d_model, self.d_ff, device=device, dtype=dtype)
+    self.w2.load_state_dict(
+      {"weight": torch.ones(d_model, self.d_ff, device=device, dtype=dtype)}
     )
-    self.w3 = nn.Parameter(
-      torch.ones(self.d_ff, d_model, device=device, dtype=dtype)
+    self.w3.load_state_dict(
+      {"weight": torch.ones(self.d_ff, d_model, device=device, dtype=dtype)}
     )
 
   def forward(
     self, x: jaxtyping.Float[torch.Tensor, "... d_model"]
   ) -> jaxtyping.Float[torch.Tensor, "... d_model"]:
-    a = silu(einsum(self.w1, x, "d_ff d_model, ... d_model -> ... d_ff"))
-    b = einsum(self.w3, x, "d_ff d_model, ... d_model -> ... d_ff")
+    a = silu(self.w1(x))
+    b = self.w3(x)
     y = einsum(a, b, "... d_ff, ... d_ff -> ... d_ff")
-    y = einsum(self.w2, y, "d_model d_ff, ... d_ff -> ... d_model")
+    y = self.w2(y)
     return y
 
 
 class RoPE(nn.Module):
   def __init__(self, d_k: int, max_seq_len: int = 2048, theta: float = 10000.0):
     """
+    Weights:
+      d_k / 2 x 1
+      max_seq_len x d_k
+      max_seq_len x d_k
+
+    FLOPS:
+      2 * b * s * d_model
     Args:
         d_k: Dimension of queries and keys (must be even).
         max_seq_len: Maximum expected sequence length.
@@ -144,7 +194,9 @@ class RoPE(nn.Module):
     rotated_paired = torch.stack((-x2, x1), dim=-1)
     return rotated_paired.view(*x.shape)
 
-  def forward(self, x: torch.Tensor) -> torch.Tensor:
+  def forward(
+    self, x: jaxtyping.Float[torch.Tensor, "b num_heads s d_k"]
+  ) -> torch.Tensor:
     """
     Args:
         x: Input tensor of shape [... sequence_length d_k]
@@ -165,9 +217,11 @@ class RoPE(nn.Module):
     return (x * cos) + (self._rotate_consecutive(x) * sin)
 
 
-def softmax(x: torch.Tensor, i: int) -> torch.Tensor:
+def softmax(x: jaxtyping.Float[torch.Tensor, '... s'], i: int) -> torch.Tensor:
   """softmax.
 
+  FLOPS:
+    b * s * d_model * 4
   Args:
     x: the tensor
     i: the i-th dimension to apply the softmax.
@@ -183,19 +237,186 @@ def softmax(x: torch.Tensor, i: int) -> torch.Tensor:
 
 
 def scaled_dot_product_attention(
-  q: jaxtyping.Float[torch.Tensor, '... queries d_k'],
-  k: jaxtyping.Float[torch.Tensor, '... keys d_k'],
-  v: jaxtyping.Float[torch.Tensor, '... keys d_v'],
-  mask: jaxtyping.Float[torch.Tensor, '... queries keys'] | None = None,
+  q: jaxtyping.Float[torch.Tensor, "... queries d_k"],
+  k: jaxtyping.Float[torch.Tensor, "... keys d_k"],
+  v: jaxtyping.Float[torch.Tensor, "... keys d_v"],
+  mask: jaxtyping.Float[torch.Tensor, "... queries keys"] | None = None,
 ) -> torch.Tensor:
-  print(f"===lizhi {k.shape=} {q.shape=} {v.shape=}")
+  """
+  FLOPS:
+    b * s * d_model * 9
+  """
   d_k = k.shape[-1]
   qk = einsum(q, k, "... queries d_k, ... keys d_k -> ... queries keys")
   qk_normalized = qk / math.sqrt(d_k)
-  print(f"===lizhi {qk_normalized.shape=}")
   if mask is not None:
-    print(f"===lizhi {mask.shape=}")
-    qk_normalized.masked_fill_(~mask, float('-inf'))
+    qk_normalized.masked_fill_(~mask, float("-inf"))
   s = softmax(qk_normalized, i=-1)
   ret = einsum(s, v, "... s_0 s, ... s d_v -> ... s_0 d_v")
   return ret
+
+
+class MHA(nn.Module):
+  """
+  Weights:
+    d_model x d_model
+    d_model x d_model
+    d_model x d_model
+    d_model x d_model
+  """
+
+  def __init__(
+    self,
+    d_model: int,
+    num_heads: int,
+    apply_rope: bool = True,
+    max_seq_len: int = 2048,
+    theta: float = 10000.0,
+  ):
+    super().__init__()
+    assert d_model % num_heads == 0
+    self.d_k = int(d_model / num_heads)
+    self.num_heads = num_heads
+
+    self.apply_rope = apply_rope
+
+    self.q_proj = Linear(in_features=d_model, out_features=d_model)
+    self.k_proj = Linear(in_features=d_model, out_features=d_model)
+    self.v_proj = Linear(in_features=d_model, out_features=d_model)
+    self.output_proj = Linear(in_features=d_model, out_features=d_model)
+
+    if self.apply_rope:
+      self.rope = RoPE(d_k=self.d_k, max_seq_len=max_seq_len, theta=theta)
+
+  def forward(
+    self,
+    x: jaxtyping.Float[torch.Tensor, "b s d_model"],
+  ) -> jaxtyping.Float[torch.Tensor, "b s d_model"]:
+    s = x.shape[1]
+
+    q = self.q_proj(x)
+    k = self.k_proj(x)
+    v = self.v_proj(x)
+
+    # Rearrange q, k, v with additional heads dim
+    q = rearrange(
+      q,
+      "b s (num_heads d_k) -> b num_heads s d_k",
+      num_heads=self.num_heads,
+      d_k=self.d_k,
+    )
+    k = rearrange(
+      k,
+      "b s (num_heads d_k) -> b num_heads s d_k",
+      num_heads=self.num_heads,
+      d_k=self.d_k,
+    )
+    v = rearrange(
+      v,
+      "b s (num_heads d_k) -> b num_heads s d_k",
+      num_heads=self.num_heads,
+      d_k=self.d_k,
+    )
+
+    # Apply RoPE
+    if self.apply_rope:
+      q = self.rope(q)
+      k = self.rope(k)
+
+    # Attn
+    mask = torch.tril(torch.ones(s, s), diagonal=0)
+    mask = mask.bool()
+    y = scaled_dot_product_attention(
+      q, k, v, mask=mask
+    )  # (b, num_heads, s, d_k)
+
+    # Proj
+    y = rearrange(y, "b num_heads s d_k -> b s (num_heads d_k)")
+    y = self.output_proj(y)
+
+    return y
+
+
+class TransformerBlock(nn.Module):
+  """
+  Weights:
+    MHA + SwiGLU + 2 x RMSNorm
+  """
+
+  def __init__(
+    self,
+    d_model: int,
+    num_heads: int,
+    d_ff: int,
+    max_seq_len: int,
+    theta: float,
+  ):
+    super().__init__()
+    self.attn = MHA(
+      d_model=d_model, num_heads=num_heads, max_seq_len=max_seq_len, theta=theta
+    )
+    self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff)
+
+    self.ln1 = RMSNorm(d_model=d_model)
+    self.ln2 = RMSNorm(d_model=d_model)
+
+  def forward(
+    self,
+    x: jaxtyping.Float[torch.Tensor, "b s d_model"],
+  ) -> jaxtyping.Float[torch.Tensor, "b s d_model"]:
+    y = self.attn(self.ln1(x))
+    y = x + y
+
+    z = self.ffn(self.ln2(y))
+    z = y + z
+
+    return z
+
+
+class TransformerLM(nn.Module):
+  """
+  Weights:
+    Embedding + num_layers x TransformerBlock + RMSNorm + Linear
+  """
+
+  def __init__(
+    self,
+    vocab_size: int,
+    context_length: int,
+    num_layers: int,
+    num_heads: int,
+    d_model: int,
+    d_ff: int,
+    rope_theta: float,
+  ):
+    super().__init__()
+
+    self.token_embeddings = Embedding(
+      num_embeddings=vocab_size, embedding_dim=d_model
+    )
+    self.layers = nn.ModuleList(
+      [
+        TransformerBlock(
+          d_model=d_model,
+          num_heads=num_heads,
+          d_ff=d_ff,
+          max_seq_len=context_length,
+          theta=rope_theta,
+        )
+        for _ in range(num_layers)
+      ]
+    )
+    self.ln_final = RMSNorm(d_model=d_model)
+    self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
+
+  def forward(
+    self,
+    x: jaxtyping.Float[torch.Tensor, "b s d_model"],
+  ) -> jaxtyping.Float[torch.Tensor, "b s d_model"]:
+    y = self.token_embeddings(x)
+    for tb in self.layers:
+      y = tb(y)
+    y = self.ln_final(y)
+    y = self.lm_head(y)
+
+    return y
