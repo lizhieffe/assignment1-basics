@@ -9,7 +9,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics import model, loss, optimizer, training
+from cs336_basics import checkpoint, model, loss, optimizer, training
 
 
 def run_linear(
@@ -582,7 +582,7 @@ def run_save_checkpoint(
           we've completed.
       out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
   """
-  raise NotImplementedError
+  checkpoint.save_checkpoint(model, optimizer, iteration, out)
 
 
 def run_load_checkpoint(
@@ -603,7 +603,7 @@ def run_load_checkpoint(
   Returns:
       int: the previously-serialized number of iterations.
   """
-  raise NotImplementedError
+  return checkpoint.load_checkpoint(src, model, optimizer)
 
 
 def get_tokenizer(

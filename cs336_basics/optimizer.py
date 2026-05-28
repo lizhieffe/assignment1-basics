@@ -65,7 +65,7 @@ class AdamW(torch.optim.Optimizer):
         p.data -= lr * lamda * p.data
         new_m = beta1 * m + (1 - beta1) * grad
         new_v = beta2 * v + (1 - beta2) * grad**2
-        p.data -= lr_t * new_m / torch.sqrt(new_v) + eps
+        p.data -= lr_t * new_m / (torch.sqrt(new_v) + eps)
 
         state["m"] = new_m
         state["v"] = new_v
@@ -102,7 +102,7 @@ def run_gradient_clipping(
   eps: float = 1e-6,
 ) -> None:
   # g_l2_norm is the l2_norm across all parameters' gradients.
- 
+
   square_sum = 0.0
   param_list = [p for p in parameters if p.grad is not None]
   for p in param_list:
