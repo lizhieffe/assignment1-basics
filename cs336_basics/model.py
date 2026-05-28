@@ -347,7 +347,7 @@ class TransformerBlock(nn.Module):
     self,
     d_model: int,
     num_heads: int,
-    d_ff: int,
+    d_ff: int | None,
     max_seq_len: int,
     theta: float,
   ):
@@ -386,7 +386,7 @@ class TransformerLM(nn.Module):
     num_layers: int,
     num_heads: int,
     d_model: int,
-    d_ff: int,
+    d_ff: int | None,
     rope_theta: float,
   ):
     super().__init__()

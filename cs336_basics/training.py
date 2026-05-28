@@ -24,11 +24,18 @@ def sample_training_data(
   # 2. Sample unique indices
   sampled_ints = rng.choice(high_bound, size=batch_size, replace=False)
 
-  inp = torch.Tensor(
-    [x[start : start + context_length] for start in sampled_ints], device=device
+  # 3. Create arrays using list comprehension
+  # We convert to a NumPy array first because PyTorch can convert a stacked
+  # numpy array to a Tensor much faster than a list of numpy slices.
+  inp_np = np.stack(
+    [x[start : start + context_length] for start in sampled_ints]
   )
-  target = torch.Tensor(
-    [x[start + 1 : start + context_length + 1] for start in sampled_ints],
-    device=device,
+  target_np = np.stack(
+    [x[start + 1 : start + context_length + 1] for start in sampled_ints]
   )
+
+  # 4. Convert to PyTorch integer tensors (int64 / long) on the correct device
+  inp = torch.tensor(inp_np, dtype=torch.long, device=device)
+  target = torch.tensor(target_np, dtype=torch.long, device=device)
+
   return (inp, target)

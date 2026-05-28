@@ -8,9 +8,15 @@ from cs336_basics import model
 
 
 def cross_entropy(
-  logits: jaxtyping.Float[torch.Tensor, "b vocab_size"],
-  targets: jaxtyping.Int[torch.Tensor, "b"],
+  logits: jaxtyping.Float[torch.Tensor, "... vocab_size"],
+  targets: jaxtyping.Int[torch.Tensor, "..."],
 ) -> jaxtyping.Float[torch.Tensor, ""]:
+  # Support both 2D (b vocab_size) and 3D (b s vocab_size) logits. 
+  logits = rearrange(logits, '... vocab_size -> (...) vocab_size')
+
+  # Support both 1D (b) and 2D (b s) targets.
+  targets = rearrange(targets, "... -> (...)")
+  
   D = logits.shape[0]
 
   # We don't use softmax, and instead cancel out the log in NLL and exp in norminator of softmax.
