@@ -9,7 +9,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics import model, loss, optimizer
+from cs336_basics import model, loss, optimizer, training
 
 
 def run_linear(
@@ -464,7 +464,12 @@ def run_get_batch(
       is the sampled input sequences, and the second tuple item is the corresponding
       language modeling labels.
   """
-  raise NotImplementedError
+  return training.sample_training_data(
+    x=dataset,
+    batch_size=batch_size,
+    context_length=context_length,
+    device=device,
+  )
 
 
 def run_softmax(
