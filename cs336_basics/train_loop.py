@@ -28,8 +28,8 @@ CONTEXT_LENGTH = 32
 SEQUENCE_LENGTH = 20
 
 
-NUM_ITERS = 100
-SAVE_CKPT_EVERY_N_ITERS = 50
+NUM_ITERS = 1000
+SAVE_CKPT_EVERY_N_ITERS = 200
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -53,6 +53,7 @@ def main():
     d_model=D_MODEL,
     d_ff=None,
     rope_theta=10000,
+    device=DEVICE
   )
 
   optz = optimizer.AdamW(

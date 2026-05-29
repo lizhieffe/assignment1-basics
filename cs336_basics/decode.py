@@ -35,7 +35,7 @@ MAX_DECODING_STEPS = 100
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-CKPT = "experiments/20260528225503/ckpts/000100/ckpt"
+CKPT = "experiments/20260528234107/ckpts/001000/ckpt"
 
 
 def decode(
@@ -79,6 +79,7 @@ def main():
     d_model=D_MODEL,
     d_ff=None,
     rope_theta=10000,
+    device=DEVICE,
   )
 
   # TODO: avoid loading optimizer.

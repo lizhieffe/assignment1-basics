@@ -18,7 +18,6 @@ class Linear(torch.nn.Module):
     self, in_features: int, out_features: int, device=None, dtype=None
   ):
     super().__init__()
-    self.device = device
     self.weight = nn.Parameter(
       torch.empty(out_features, in_features, device=device, dtype=dtype)
     )
@@ -146,7 +145,13 @@ class SwiGLU(nn.Module):
 
 
 class RoPE(nn.Module):
-  def __init__(self, d_k: int, max_seq_len: int = 2048, theta: float = 10000.0):
+  def __init__(
+    self,
+    d_k: int,
+    max_seq_len: int = 2048,
+    theta: float = 10000.0,
+    device: str = None,
+  ):
     """
     Weights:
       d_k / 2 x 1
@@ -165,11 +170,13 @@ class RoPE(nn.Module):
     self.d_k = d_k
 
     # 1. Compute the frequencies for each consecutive pair: shape [d_k // 2]
-    inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2).float() / d_k))
+    inv_freq = 1.0 / (
+      theta ** (torch.arange(0, d_k, 2, device=device).float() / d_k)
+    )
     self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     # 2. Compute sequence positions: shape [max_seq_len]
-    t = torch.arange(max_seq_len, dtype=torch.float32)
+    t = torch.arange(max_seq_len, dtype=torch.float32, device=device)
 
     # 3. Outer product creates frequency matrix: shape [max_seq_len, d_k // 2]
     freqs = torch.einsum("i,j->ij", t, self.inv_freq)
@@ -217,7 +224,7 @@ class RoPE(nn.Module):
     return (x * cos) + (self._rotate_consecutive(x) * sin)
 
 
-def softmax(x: jaxtyping.Float[torch.Tensor, '... s'], i: int) -> torch.Tensor:
+def softmax(x: jaxtyping.Float[torch.Tensor, "... s"], i: int) -> torch.Tensor:
   """softmax.
 
   FLOPS:
@@ -272,21 +279,33 @@ class MHA(nn.Module):
     apply_rope: bool = True,
     max_seq_len: int = 2048,
     theta: float = 10000.0,
+    device: str | None = None,
   ):
     super().__init__()
     assert d_model % num_heads == 0
+    self.device = device
     self.d_k = int(d_model / num_heads)
     self.num_heads = num_heads
 
     self.apply_rope = apply_rope
 
-    self.q_proj = Linear(in_features=d_model, out_features=d_model)
-    self.k_proj = Linear(in_features=d_model, out_features=d_model)
-    self.v_proj = Linear(in_features=d_model, out_features=d_model)
-    self.output_proj = Linear(in_features=d_model, out_features=d_model)
+    self.q_proj = Linear(
+      in_features=d_model, out_features=d_model, device=device
+    )
+    self.k_proj = Linear(
+      in_features=d_model, out_features=d_model, device=device
+    )
+    self.v_proj = Linear(
+      in_features=d_model, out_features=d_model, device=device
+    )
+    self.output_proj = Linear(
+      in_features=d_model, out_features=d_model, device=device
+    )
 
     if self.apply_rope:
-      self.rope = RoPE(d_k=self.d_k, max_seq_len=max_seq_len, theta=theta)
+      self.rope = RoPE(
+        d_k=self.d_k, max_seq_len=max_seq_len, theta=theta, device=device
+      )
 
   def forward(
     self,
@@ -324,7 +343,7 @@ class MHA(nn.Module):
       k = self.rope(k)
 
     # Attn
-    mask = torch.tril(torch.ones(s, s), diagonal=0)
+    mask = torch.tril(torch.ones(s, s, device=self.device), diagonal=0)
     mask = mask.bool()
     y = scaled_dot_product_attention(
       q, k, v, mask=mask
@@ -350,15 +369,20 @@ class TransformerBlock(nn.Module):
     d_ff: int | None,
     max_seq_len: int,
     theta: float,
+    device: str | None = None,
   ):
     super().__init__()
     self.attn = MHA(
-      d_model=d_model, num_heads=num_heads, max_seq_len=max_seq_len, theta=theta
+      d_model=d_model,
+      num_heads=num_heads,
+      max_seq_len=max_seq_len,
+      theta=theta,
+      device=device,
     )
-    self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff)
+    self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff, device=device)
 
-    self.ln1 = RMSNorm(d_model=d_model)
-    self.ln2 = RMSNorm(d_model=d_model)
+    self.ln1 = RMSNorm(d_model=d_model, device=device)
+    self.ln2 = RMSNorm(d_model=d_model, device=device)
 
   def forward(
     self,
@@ -388,11 +412,12 @@ class TransformerLM(nn.Module):
     d_model: int,
     d_ff: int | None,
     rope_theta: float,
+    device: str | None = None,
   ):
     super().__init__()
 
     self.token_embeddings = Embedding(
-      num_embeddings=vocab_size, embedding_dim=d_model
+      num_embeddings=vocab_size, embedding_dim=d_model, device=device
     )
     self.layers = nn.ModuleList(
       [
@@ -402,12 +427,15 @@ class TransformerLM(nn.Module):
           d_ff=d_ff,
           max_seq_len=context_length,
           theta=rope_theta,
+          device=device,
         )
         for _ in range(num_layers)
       ]
     )
-    self.ln_final = RMSNorm(d_model=d_model)
-    self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
+    self.ln_final = RMSNorm(d_model=d_model, device=device)
+    self.lm_head = Linear(
+      in_features=d_model, out_features=vocab_size, device=device
+    )
 
   def forward(
     self,
