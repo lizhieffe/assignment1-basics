@@ -16,10 +16,9 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from transformers import AutoTokenizer
 
-from cs336_basics import checkpoint, model, optimizer, training
+from cs336_basics import checkpoint, constants, model, optimizer, training
 from cs336_basics import loss as loss_lib
 
-TOKENIZER_NAME = "gpt2"
 
 NUM_LAYERS = 2
 NUM_HEADS = 4
@@ -32,15 +31,15 @@ SEQUENCE_LENGTH = 20
 NUM_ITERS = 100
 SAVE_CKPT_EVERY_N_ITERS = 50
 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 TRAINING_QUERYSET = "data/TinyStoriesV2-GPT4-train.tokens.bin"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def main():
   uuid = datetime.now().strftime("%Y%m%d%H%M%S")
 
-  tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
+  tokenizer = AutoTokenizer.from_pretrained(constants.TOKENIZER_NAME)
   vocab_size = tokenizer.vocab_size
   dtype = np.uint16 if vocab_size < 65536 else np.uint32
 
