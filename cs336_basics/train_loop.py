@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
+from datetime import datetime
 from typing import IO, Any, BinaryIO
 
 import numpy as np
@@ -18,26 +19,32 @@ from transformers import AutoTokenizer
 from cs336_basics import checkpoint, model, optimizer, training
 from cs336_basics import loss as loss_lib
 
+TOKENIZER_NAME = "gpt2"
+
 NUM_LAYERS = 2
 NUM_HEADS = 4
 D_MODEL = 128
-
-NUM_ITERS = 100
-
 BATCH_SIZE = 32
 CONTEXT_LENGTH = 32
 SEQUENCE_LENGTH = 20
-TRAIN_TOKEN_DATA = "data/TinyStoriesV2-GPT4-train.tokens.bin"
-TOKENIZER_NAME = "gpt2"
+
+
+NUM_ITERS = 100
+SAVE_CKPT_EVERY_N_ITERS = 50
+
+
+TRAINING_QUERYSET = "data/TinyStoriesV2-GPT4-train.tokens.bin"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def main():
+  uuid = datetime.now().strftime("%Y%m%d%H%M%S")
+
   tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
   vocab_size = tokenizer.vocab_size
   dtype = np.uint16 if vocab_size < 65536 else np.uint32
 
-  print(f"===lizhi {vocab_size=} {dtype=} {DEVICE=}")
+  print(f"{vocab_size=} {dtype=} {DEVICE=}")
 
   transformer_lm = model.TransformerLM(
     vocab_size=vocab_size,
@@ -57,11 +64,28 @@ def main():
     eps=1e-8,
   )
 
-  big_array = np.memmap(TRAIN_TOKEN_DATA, dtype=dtype, mode="r")
+  big_array = np.memmap(TRAINING_QUERYSET, dtype=dtype, mode="r")
 
-  it = 0
+  out_dir = f"experiments/{uuid}/ckpts"
+  os.makedirs(out_dir, exist_ok=False)
+  print(f"Verified checkpoint directory structure exists at: {out_dir}")
+
+  if SAVE_CKPT_EVERY_N_ITERS and SAVE_CKPT_EVERY_N_ITERS > 0:
+    ckpt_dir = f"{out_dir}/{str(0).zfill(6)}"
+    os.makedirs(ckpt_dir, exist_ok=False)
+    ckpt_file = f"{ckpt_dir}/ckpt"
+    checkpoint.save_checkpoint(
+      model=transformer_lm,
+      optimizer=optz,
+      iteration=0,
+      out=ckpt_file,
+    )
+    print(f"Saved initial ckpt to {ckpt_file}")
+
+  it = 1
   for _ in range(NUM_ITERS):
     print(f"============== it = {it} ====================")
+
     optz.zero_grad()
     x, y = training.sample_training_data(
       x=big_array,
@@ -71,11 +95,27 @@ def main():
     )
     print(f"Sampled training data {x.shape=} {y.shape=}")
     logits = transformer_lm(x)
-    # print(f"{logits=}")
     loss = loss_lib.cross_entropy(logits=logits, targets=y)
-    print(f"===lizhi {loss.item()=}")
+    print(f"Loss = {loss.item():.3f}")
     loss.backward()
     optz.step()
+
+    if (
+      SAVE_CKPT_EVERY_N_ITERS
+      and SAVE_CKPT_EVERY_N_ITERS > 0
+      and it % SAVE_CKPT_EVERY_N_ITERS == 0
+    ):
+      ckpt_dir = f"{out_dir}/{str(it).zfill(6)}"
+      os.makedirs(ckpt_dir, exist_ok=False)
+      ckpt_file = f"{ckpt_dir}/ckpt"
+      checkpoint.save_checkpoint(
+        model=transformer_lm,
+        optimizer=optz,
+        iteration=it,
+        out=ckpt_file,
+      )
+      print(f"Saved ckpt to {ckpt_file}")
+
     it += 1
 
 
