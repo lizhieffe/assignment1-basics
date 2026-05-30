@@ -1,6 +1,6 @@
 # Run:
 #   uv pip install -e . \
-#   uv run cs336_basics/train_loop.py
+#   uv run cs336_basics/train_loop.py --config=CONFIG_00001
 #
 # Training metrics: https://wandb.ai/lizhieffe-teestory/cs336-assignment-1
 
@@ -11,6 +11,8 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import IO, Any, BinaryIO
 
+import argparse
+import dataclasses
 import jaxtyping
 import numpy as np
 import numpy.typing as npt
@@ -21,28 +23,22 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from transformers import AutoTokenizer
 
-from cs336_basics import checkpoint, constants, model, optimizer, training
+from cs336_basics import (
+  checkpoint,
+  constants,
+  model,
+  optimizer,
+  train_configs,
+  training,
+)
 from cs336_basics import loss as loss_lib
 
-
-NUM_LAYERS = 2
-NUM_HEADS = 4
-D_MODEL = 128
-BATCH_SIZE = 32
-CONTEXT_LENGTH = 32
-SEQUENCE_LENGTH = 20
-
-
-NUM_ITERS = 1000
-SAVE_CKPT_EVERY_N_ITERS = 200
-
-EVAL_QUERY_COUNT = 1024
-EVAL_EVERY_N_ITERS = 20
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 TRAINING_QUERYSET = "data/TinyStoriesV2-GPT4-train.tokens.bin"
 EVAL_QUERYSET = "data/TinyStoriesV2-GPT4-valid.tokens.bin"
+EVAL_QUERY_COUNT = 1024
 
 
 def run_eval(
@@ -84,45 +80,41 @@ def run_eval(
   return total_loss_sum / total_samples
 
 
-def main():
+def run_training_loop(transformer_lm_config: train_configs.TransformerLMConfig):
   uuid = datetime.now().strftime("%Y%m%d%H%M%S")
 
   tokenizer = AutoTokenizer.from_pretrained(constants.TOKENIZER_NAME)
   vocab_size = tokenizer.vocab_size
   dtype = np.uint16 if vocab_size < 65536 else np.uint32
 
-  config = {
-    "num_layers": NUM_LAYERS,
-    "num_heads": NUM_HEADS,
-    "d_model": D_MODEL,
-    "batch_size": BATCH_SIZE,
-    "context_length": CONTEXT_LENGTH,
-    "num_iters": NUM_ITERS,
-    "lr": 1e-3,
-    "weight_decay": 0.01,
-    "device": DEVICE,
-  }
-  print(f"Start training with config: {config}")
-  wandb.init(project="cs336-assignment-1", name=f"run-{uuid}", config=config)
+  config_dict = dataclasses.asdict(transformer_lm_config)
+  print(f"Start training with config: {config_dict}")
+  wandb.init(
+    project="cs336-assignment-1", name=f"run-{uuid}", config=config_dict
+  )
 
   transformer_lm = model.TransformerLM(
     vocab_size=vocab_size,
-    context_length=CONTEXT_LENGTH,
-    num_layers=NUM_LAYERS,
-    num_heads=NUM_HEADS,
-    d_model=D_MODEL,
-    d_ff=None,
-    rope_theta=10000,
+    context_length=transformer_lm_config.context_length,
+    num_layers=transformer_lm_config.num_layers,
+    num_heads=transformer_lm_config.num_heads,
+    d_model=transformer_lm_config.d_model,
+    d_ff=transformer_lm_config.d_ff,
+    rope_theta=transformer_lm_config.rope_theta,
     device=DEVICE,
   )
 
   # Track gradients and model topology.
-  wandb.watch(transformer_lm, log="gradients", log_freq=EVAL_EVERY_N_ITERS)
+  wandb.watch(
+    transformer_lm,
+    log="gradients",
+    log_freq=transformer_lm_config.eval_every_n_iters,
+  )
 
   optz = optimizer.AdamW(
     params=transformer_lm.parameters(),
-    lr=1e-3,
-    weight_decay=0.01,
+    lr=transformer_lm_config.lr,
+    weight_decay=transformer_lm_config.weight_decay,
     betas=(0.9, 0.999),
     eps=1e-8,
   )
@@ -134,7 +126,10 @@ def main():
   os.makedirs(out_dir, exist_ok=False)
   print(f"Verified checkpoint directory structure exists at: {out_dir}")
 
-  if SAVE_CKPT_EVERY_N_ITERS and SAVE_CKPT_EVERY_N_ITERS > 0:
+  if (
+    transformer_lm_config.save_ckpt_every_n_iters
+    and transformer_lm_config.save_ckpt_every_n_iters > 0
+  ):
     ckpt_dir = f"{out_dir}/{str(0).zfill(6)}"
     os.makedirs(ckpt_dir, exist_ok=False)
     ckpt_file = f"{ckpt_dir}/ckpt"
@@ -150,7 +145,7 @@ def main():
   eval_x, eval_targets = training.sample_training_data(
     x=eval_query_array,
     batch_size=EVAL_QUERY_COUNT,
-    context_length=CONTEXT_LENGTH,
+    context_length=transformer_lm_config.context_length,
     device=DEVICE,
   )
 
@@ -159,17 +154,17 @@ def main():
   wandb.log({"eval/loss": eval_loss}, step=0)
 
   it = 1
-  for _ in range(NUM_ITERS):
+  for _ in range(transformer_lm_config.num_iters):
     optz.zero_grad()
     x, y = training.sample_training_data(
       x=big_array,
-      batch_size=BATCH_SIZE,
-      context_length=CONTEXT_LENGTH,
+      batch_size=transformer_lm_config.batch_size,
+      context_length=transformer_lm_config.context_length,
       device=DEVICE,
     )
     logits = transformer_lm(x)
     loss = loss_lib.cross_entropy(logits=logits, targets=y)
-    if it % EVAL_EVERY_N_ITERS == 0:
+    if it % transformer_lm_config.eval_every_n_iters == 0:
       print(f"============== it = {it} ====================")
       loss_val = loss.item()
       print(f"Train Loss = {loss_val:.3f}")
@@ -178,9 +173,9 @@ def main():
     optz.step()
 
     if (
-      SAVE_CKPT_EVERY_N_ITERS
-      and SAVE_CKPT_EVERY_N_ITERS > 0
-      and it % SAVE_CKPT_EVERY_N_ITERS == 0
+      transformer_lm_config.save_ckpt_every_n_iters
+      and transformer_lm_config.save_ckpt_every_n_iters > 0
+      and it % transformer_lm_config.save_ckpt_every_n_iters == 0
     ):
       ckpt_dir = f"{out_dir}/{str(it).zfill(6)}"
       os.makedirs(ckpt_dir, exist_ok=False)
@@ -193,7 +188,7 @@ def main():
       )
       print(f"Saved ckpt to {ckpt_file}")
 
-    if it % EVAL_EVERY_N_ITERS == 0:
+    if it % transformer_lm_config.eval_every_n_iters == 0:
       eval_loss = run_eval(x=eval_x, targets=eval_targets, model=transformer_lm)
       print(f"Eval Loss = {eval_loss:.3f}")
       wandb.log({"eval/loss": eval_loss}, step=it)
@@ -204,4 +199,30 @@ def main():
 
 
 if __name__ == "__main__":
-  main()
+  # Set up argument parsing
+  parser = argparse.ArgumentParser(
+    description="Run Transformer LM training loop with a specified config."
+  )
+  parser.add_argument(
+    "--config",
+    type=str,
+    required=True,
+    help="The variable name of the TransformerLMConfig instance inside train_configs.py",
+  )
+  args = parser.parse_args()
+
+  # Dynamic lookup using getattr
+  try:
+    selected_config = getattr(train_configs, args.config)
+  except AttributeError:
+    raise ValueError(
+      f"Config variable '{args.config}' not found in 'cs336_basics/train_configs.py'."
+    )
+
+  # Validate type safely
+  if not isinstance(selected_config, train_configs.TransformerLMConfig):
+    raise TypeError(
+      f"'{args.config}' is not an instance of train_configs.TransformerLMConfig."
+    )
+
+  run_training_loop(transformer_lm_config=selected_config)
