@@ -167,3 +167,6 @@ cython_debug/
 
 .ruff_cache/
 *.zip
+
+# Weights & Biases local artifacts and logs
+wandb/
