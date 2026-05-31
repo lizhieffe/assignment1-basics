@@ -10,11 +10,17 @@ SEQUENCE_LENGTH = 20
 
 
 NUM_ITERS = 1000
-SAVE_CKPT_EVERY_N_ITERS = 200
+SAVE_CKPT_EVERY_N_ITERS = 500
 
-EVAL_EVERY_N_ITERS = 20
+EVAL_EVERY_N_ITERS = 100
 
-TOTAL_PRETRAIN_TOKENS = 40960000
+
+TOTAL_PRETRAIN_TOKENS = (
+  40_960_000  # 5k training iterations for 32 BS and context length 256
+)
+TOTAL_PRETRAIN_TOKENS = (
+  327_680_000  # 40k training iterations for 32 BS and context length 256
+)
 
 
 @dataclasses.dataclass
@@ -44,11 +50,11 @@ CONFIG_00001 = TransformerLMConfig(
   num_heads=16,
   d_model=512,
   d_ff=1344,
-  batch_size=8,
+  batch_size=32,
   context_length=256,
   # Roughly 5K iters for the given TOTAL_PRETRAIN_TOKENS.
   num_iters=_get_num_iters(
-    TOTAL_PRETRAIN_TOKENS, batch_size=8, context_length=256
+    TOTAL_PRETRAIN_TOKENS, batch_size=32, context_length=256
   ),
   rope_theta=10000,
   lr=1e-3,

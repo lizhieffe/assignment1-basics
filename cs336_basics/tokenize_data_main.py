@@ -4,13 +4,12 @@
 #   uv pip install -e . \
 #   uv run cs336_basics/tokenize_data_main.py
 
-import os
 import multiprocessing as mp
 from pathlib import Path
 import numpy as np
-from cs336_basics import constants
-from transformers import AutoTokenizer
 from tqdm import tqdm
+
+from cs336_basics import bpe_tokenizer
 
 # --- CONFIGURATION ---
 DATA_DIR = Path("data")
@@ -22,18 +21,9 @@ NUM_CORES = max(1, int(mp.cpu_count() * 0.8))
 BATCH_CHUNK_SIZE = 2000
 
 
-def get_tokenizer():
-  """Initializes the tokenizer and disables internal length warnings."""
-  tokenizer = AutoTokenizer.from_pretrained(constants.TOKENIZER_NAME)
-  # TODO: this should be unnecessary anymore.
-  # Set max length to an astronomical number to stop Hugging Face truncation warnings
-  # tokenizer.model_max_length = int(1e30)
-  return tokenizer
-
-
 def tokenize_batch(batch_lines):
   """Worker target function: Tokenizes a batch of text strings on an isolated CPU core."""
-  tokenizer = get_tokenizer()
+  tokenizer = bpe_tokenizer.get_tokenizer()
   # truncation=False guarantees zero text or token loss
   outputs = tokenizer(batch_lines, truncation=False, add_special_tokens=False)
 
@@ -65,7 +55,7 @@ def chunked_generator(iterable, chunk_size):
 
 if __name__ == "__main__":
   # 1. Initialize tokenizer baseline to dynamically determine data types
-  main_tokenizer = get_tokenizer()
+  main_tokenizer = bpe_tokenizer.get_tokenizer()
   vocab_size = main_tokenizer.vocab_size
   dtype = np.uint16 if vocab_size < 65536 else np.uint32
 

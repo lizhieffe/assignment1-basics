@@ -1,31 +1,28 @@
 # Run:
-#   uv pip install -e . \
-#   uv run cs336_basics/train_loop.py --config=CONFIG_00001
+#   1. uv pip install -e .
+#   2. Download training data: https://github.com/stanford-cs336/assignment1-basics#download-data
+#   3. tokenize the data: See `cs336_basics/tokenize_data_main.py`
+#   4. Run training: `uv run cs336_basics/train_loop.py --config=CONFIG_00001`
 #
 # Training metrics: https://wandb.ai/lizhieffe-teestory/cs336-assignment-1
 
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
 from datetime import datetime
-from typing import IO, Any, BinaryIO
 
 import argparse
 import dataclasses
 import jaxtyping
 import numpy as np
-import numpy.typing as npt
 import torch
 import torch.nn as nn
 import wandb
-from jaxtyping import Bool, Float, Int
-from torch import Tensor
-from transformers import AutoTokenizer
+
 
 from cs336_basics import (
+  bpe_tokenizer,
   checkpoint,
-  constants,
   model,
   optimizer,
   train_configs,
@@ -42,8 +39,8 @@ EVAL_QUERY_COUNT = 1024
 
 
 def run_eval(
-  x: jaxtyping.Int(torch.Tensor, "b s"),
-  targets: jaxtyping.Int(torch.Tensor, "b s"),
+  x: jaxtyping.Int[torch.Tensor, "b s"],
+  targets: jaxtyping.Int[torch.Tensor, "b s"],
   model: nn.Module,
   BATCH_SIZE: int = 32,  # Added BATCH_SIZE parameter
 ) -> float:
@@ -83,8 +80,9 @@ def run_eval(
 def run_training_loop(transformer_lm_config: train_configs.TransformerLMConfig):
   uuid = datetime.now().strftime("%Y%m%d%H%M%S")
 
-  tokenizer = AutoTokenizer.from_pretrained(constants.TOKENIZER_NAME)
+  tokenizer = bpe_tokenizer.get_tokenizer()
   vocab_size = tokenizer.vocab_size
+  print(f"Tokenizer vocab size: {vocab_size}")
   dtype = np.uint16 if vocab_size < 65536 else np.uint32
 
   config_dict = dataclasses.asdict(transformer_lm_config)
@@ -104,12 +102,12 @@ def run_training_loop(transformer_lm_config: train_configs.TransformerLMConfig):
     device=DEVICE,
   )
 
-  # Track gradients and model topology.
-  wandb.watch(
-    transformer_lm,
-    log="gradients",
-    log_freq=transformer_lm_config.eval_every_n_iters,
-  )
+  # # Track gradients and model topology.
+  # wandb.watch(
+  #   transformer_lm,
+  #   log="gradients",
+  #   log_freq=transformer_lm_config.eval_every_n_iters,
+  # )
 
   optz = optimizer.AdamW(
     params=transformer_lm.parameters(),
